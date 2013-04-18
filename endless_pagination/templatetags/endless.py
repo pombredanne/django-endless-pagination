@@ -4,6 +4,7 @@ from __future__ import unicode_literals
 import re
 
 from django import template
+from django.utils.encoding import iri_to_uri
 
 from endless_pagination import (
     models,
@@ -18,17 +19,17 @@ from endless_pagination.paginators import (
 
 
 PAGINATE_EXPRESSION = re.compile(r"""
-    ^   # Begin of line.
+    ^   # Beginning of line.
     (((?P<first_page>\w+)\,)?(?P<per_page>\w+)\s+)?  # First page, per page.
     (?P<objects>[\.\w]+)  # Objects / queryset.
-    (\s+starting\s+from\s+page\s+(?P<number>\w+))?  # Page start.
+    (\s+starting\s+from\s+page\s+(?P<number>[\-]?\d+|\w+))?  # Page start.
     (\s+using\s+(?P<key>[\"\'\-\w]+))?  # Querystring key.
     (\s+with\s+(?P<override_path>[\"\'\/\w]+))?  # Override path.
     (\s+as\s+(?P<var_name>\w+))?  # Context variable name.
     $   # End of line.
 """, re.VERBOSE)
 SHOW_CURRENT_NUMBER_EXPRESSION = re.compile(r"""
-    ^   # Begin of line.
+    ^   # Beginning of line.
     (starting\s+from\s+page\s+(?P<number>\w+))?\s*  # Page start.
     (using\s+(?P<key>[\"\'\-\w]+))?\s*  # Querystring key.
     (as\s+(?P<var_name>\w+))?  # Context variable name.
@@ -87,6 +88,13 @@ def paginate(parser, token, paginator_class=None):
     .. code-block:: html+django
 
         {% paginate entries starting from page 3 %}
+
+    When changing the default page, it is also possible to reference the last
+    page (or the second last page, and so on) by using negative indexes, e.g:
+
+    .. code-block:: html+django
+
+        {% paginate entries starting from page -1 %}
 
     This can be also achieved using a template variable that was passed to the
     context, e.g.:
@@ -226,10 +234,11 @@ class PaginateNode(template.Node):
         self.page_number_variable = None
         if number is None:
             self.page_number = 1
-        elif number.isdigit():
-            self.page_number = int(number)
         else:
-            self.page_number_variable = template.Variable(number)
+            try:
+                self.page_number = int(number)
+            except ValueError:
+                self.page_number_variable = template.Variable(number)
 
         # Set the querystring key attribute.
         self.querystring_key_variable = None
@@ -283,13 +292,19 @@ class PaginateNode(template.Node):
         else:
             override_path = self.override_path_variable.resolve(context)
 
-        # The current request is used to get the requested page number.
-        page_number = utils.get_page_number_from_request(
-            context['request'], querystring_key, default=default_number)
-
+        # Retrieve the queryset and create the paginator object.
         objects = self.objects.resolve(context)
         paginator = self.paginator(
             objects, per_page, first_page=first_page, orphans=settings.ORPHANS)
+
+        # Normalize the default page number if a negative one is provided.
+        if default_number < 0:
+            default_number = utils.normalize_page_number(
+                default_number, paginator.page_range)
+
+        # The current request is used to get the requested page number.
+        page_number = utils.get_page_number_from_request(
+            context['request'], querystring_key, default=default_number)
 
         # Get the page.
         try:
@@ -342,7 +357,7 @@ def show_more(context, label=None, loading=settings.LOADING):
         return {
             'label': label,
             'loading': loading,
-            'path': data['override_path'] or request.path,
+            'path': iri_to_uri(data['override_path'] or request.path),
             'querystring': querystring,
             'querystring_key': querystring_key,
             'request': request,
@@ -376,6 +391,14 @@ def get_pages(parser, token):
     .. code-block:: html+django
 
         {{ pages|length }}
+
+    - check if the page list contains more than one page:
+
+    .. code-block:: html+django
+
+        {{ pages.paginated }}
+        {# the following is equivalent #}
+        {{ pages|length > 1 }}
 
     - get a specific page:
 

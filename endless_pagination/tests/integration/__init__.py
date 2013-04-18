@@ -9,27 +9,50 @@ from django.http import QueryDict
 from django.test import LiveServerTestCase
 from django.utils import unittest
 from selenium.common import exceptions
-from selenium.webdriver.firefox.webdriver import WebDriver
+from selenium.webdriver import Firefox
 from selenium.webdriver.support import ui
+from xvfbwrapper.xvfbwrapper import Xvfb
+
+from endless_pagination.utils import PYTHON3
 
 
-USE_SELENIUM = os.getenv('USE_SELENIUM', False)
+SHOW_BROWSER = os.getenv('SHOW_BROWSER', False)
+SKIP_SELENIUM = os.getenv('SKIP_SELENIUM', False)
+# FIXME: do not exclude integration tests on Python3 once Selenium is updated
+# (bug #17).
+tests_are_run = not (PYTHON3 or SKIP_SELENIUM)
 
 
 def setup_package():
     """Set up the Selenium driver once for all tests."""
-    if USE_SELENIUM:
-        selenium = SeleniumTestCase.selenium = WebDriver()
+    # Just skipping *setup_package* and *teardown_package* generates an
+    # uncaught exception under Python 2.6.
+    if tests_are_run:
+        if not SHOW_BROWSER:
+            # Perform all graphical operations in memory.
+            vdisplay = SeleniumTestCase.vdisplay = Xvfb(width=1280, height=720)
+            vdisplay.start()
+        # Create a Selenium browser instance.
+        selenium = SeleniumTestCase.selenium = Firefox()
         SeleniumTestCase.wait = ui.WebDriverWait(selenium, 10)
 
 
 def teardown_package():
     """Quit the Selenium driver."""
-    if USE_SELENIUM:
+    if tests_are_run:
         SeleniumTestCase.selenium.quit()
+        if not SHOW_BROWSER:
+            SeleniumTestCase.vdisplay.stop()
 
 
-@unittest.skipUnless(USE_SELENIUM, 'env variable USE_SELENIUM is not set.')
+# FIXME: do not exclude integration tests on Python3 once Selenium is updated
+# (bug #17).
+@unittest.skipIf(
+    PYTHON3,
+    'excluding integration tests: Python 3 tests are still not supported.')
+@unittest.skipIf(
+    SKIP_SELENIUM,
+    'excluding integration tests: environment variable SKIP_SELENIUM is set.')
 class SeleniumTestCase(LiveServerTestCase):
     """Base test class for integration tests."""
 
@@ -82,10 +105,10 @@ class SeleniumTestCase(LiveServerTestCase):
     def get_current_elements(self, class_name, driver=None):
         """Return the range of current elements as a list of numbers."""
         elements = []
-        path = '//div[contains(@class, "{0}")]/h4'.format(class_name)
+        selector = 'div.{0} > h4'.format(class_name)
         if driver is None:
             driver = self.selenium
-        for element in driver.find_elements_by_xpath(path):
+        for element in driver.find_elements_by_css_selector(selector):
             elements.append(int(element.text.split()[1]))
         return elements
 

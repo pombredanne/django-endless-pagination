@@ -18,7 +18,8 @@ if sys.version_info[0] >= 3:
     text = str
 else:
     PYTHON3 = False
-    text = unicode
+    # Avoid lint errors under Python 3.
+    text = unicode  # NOQA
 
 
 def get_data_from_context(context):
@@ -171,6 +172,18 @@ def get_querystring_for_page(
     if querydict:
         return '?' + querydict.urlencode()
     return ''
+
+
+def normalize_page_number(page_number, page_range):
+    """Handle a negative *page_number*.
+
+    Return a positive page number contained in *page_range*.
+    If the negative index is out of range, return the page number 1.
+    """
+    try:
+        return page_range[page_number]
+    except IndexError:
+        return page_range[0]
 
 
 class UnicodeMixin(object):

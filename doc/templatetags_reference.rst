@@ -1,6 +1,8 @@
 Templatetags reference
 ======================
 
+.. _templatetags-paginate:
+
 paginate
 ~~~~~~~~
 
@@ -49,6 +51,13 @@ but you can change this, e.g.:
 
     {% paginate entries starting from page 3 %}
 
+When changing the default page, it is also possible to reference the last
+page (or the second last page, and so on) by using negative indexes, e.g:
+
+.. code-block:: html+django
+
+    {% paginate entries starting from page -1 %}
+
 This can be also achieved using a template variable that was passed to the
 context, e.g.:
 
@@ -57,6 +66,9 @@ context, e.g.:
     {% paginate entries starting from page page_number %}
 
 If the passed page number does not exist, the first page is displayed.
+Note that negative indexes are specific to the ``{% paginate %}`` tag: this
+feature cannot be used when contents are lazy paginated (see `lazy_paginate`_
+below).
 
 If you have multiple paginations in the same page, you can change the
 querydict key for the single pagination, e.g.:
@@ -100,15 +112,28 @@ you want 3 items on the first page and 10 on other pages:
 
     {% paginate 3,10 entries %}
 
-You must use this tag before calling the `show_more`_ one.
+You must use this tag before calling the `show_more`_, `get_pages`_ or
+`show_pages`_ ones.
+
+.. _templatetags-lazy-paginate:
 
 lazy_paginate
 ~~~~~~~~~~~~~
 
 Paginate objects without hitting the database with a *select count* query.
+Usually pagination requires hitting the database to get the total number of
+items to display. Lazy pagination avoids this *select count* query and results
+in a faster page load, with a disadvantage: you won't know the total number of
+pages in advance.
 
-Use this in the same way as `paginate`_ tag when you are not interested
-in the total number of pages.
+Use this in the same way as `paginate`_ tag when you are not interested in the
+total number of pages.
+
+The ``lazy_paginate`` tag can take all the args of the ``paginate`` one, with
+one exception: negative indexes can not be passed to the ``starting from page``
+argument.
+
+.. _templatetags-show-more:
 
 show_more
 ~~~~~~~~~
@@ -132,6 +157,8 @@ You can override the loading text too:
     {% show_more "even more" "working" %}
 
 Must be called after `paginate`_ or `lazy_paginate`_.
+
+.. _templatetags-get-pages:
 
 get_pages
 ~~~~~~~~~
@@ -158,6 +185,14 @@ of page links. You can use *pages* in different ways:
 .. code-block:: html+django
 
     {{ pages|length }}
+
+- check if the page list contains more than one page:
+
+.. code-block:: html+django
+
+    {{ pages.paginated }}
+    {# the following is equivalent #}
+    {{ pages|length > 1 }}
 
 - get a specific page:
 
@@ -235,6 +270,8 @@ You can change the variable name, e.g.:
 
 This must be called after `paginate`_ or `lazy_paginate`_.
 
+.. _templatetags-show-pages:
+
 show_pages
 ~~~~~~~~~~
 
@@ -286,6 +323,8 @@ to the number of pages, making it arguably more usable when there are many
 of them.
 
 This must be called after `paginate`_ or `lazy_paginate`_.
+
+.. _templatetags-show-current-number:
 
 show_current_number
 ~~~~~~~~~~~~~~~~~~~

@@ -2,6 +2,7 @@
 
 from __future__ import unicode_literals
 import string
+import sys
 import xml.etree.ElementTree as etree
 
 from django.template import (
@@ -11,6 +12,7 @@ from django.template import (
 )
 from django.test import TestCase
 from django.test.client import RequestFactory
+from django.utils import unittest
 
 from endless_pagination.exceptions import PaginationError
 from endless_pagination.models import PageList
@@ -18,6 +20,11 @@ from endless_pagination.settings import (
     PAGE_LABEL,
     PER_PAGE,
 )
+from endless_pagination.tests import make_model_instances
+
+
+skip_if_old_etree = unittest.skipIf(
+    sys.version_info < (2, 7), 'XPath not supported by this Python version.')
 
 
 class TemplateTagsTestMixin(object):
@@ -69,6 +76,23 @@ class PaginateTestMixin(TemplateTagsTestMixin):
 
     Subclasses must define *tagname*.
     """
+
+    def assertPaginationNumQueries(self, num_queries, template, queryset=None):
+        """Assert the expected *num_queries* are actually executed.
+
+        The given *queryset* is paginated using *template*. If the *queryset*
+        is not given, a default queryset containing 47 model instances is used.
+        In the *template*, the queryset must be referenced as ``objects``.
+
+        Return the resulting list of objects for the current page.
+        """
+        if queryset is None:
+            queryset = make_model_instances(47)
+        request = self.request()
+        with self.assertNumQueries(num_queries):
+            _, context = self.render(request, template, objects=queryset)
+            objects = list(context['objects'])
+        return objects
 
     def assertRangeEqual(self, expected, actual):
         """Assert the *expected* range equals the *actual* one."""
@@ -247,12 +271,83 @@ class PaginateTest(PaginateTestMixin, TestCase):
 
     tagname = 'paginate'
 
+    def test_starting_from_last_page_argument(self):
+        # Ensure the queryset reflects the given ``starting_from_page``
+        # argument when the last page is requested.
+        template = '{% $tagname 10 objects starting from page -1 %}'
+        _, context = self.render(self.request(), template)
+        self.assertRangeEqual(range(40, 47), context['objects'])
+
+    def test_starting_from_negative_page_argument(self):
+        # Ensure the queryset reflects the given ``starting_from_page``
+        # argument when a negative number is passed as value.
+        template = '{% $tagname 10 objects starting from page -3 %}'
+        _, context = self.render(self.request(), template)
+        self.assertRangeEqual(range(20, 30), context['objects'])
+
+    def test_starting_from_negative_page_argument_as_variable(self):
+        # Ensure the queryset reflects the given ``starting_from_page``
+        # argument when a negative number is passed as value.
+        # In this case, the argument is provided as context variable.
+        template = '{% $tagname 10 objects starting from page mypage %}'
+        _, context = self.render(
+            self.request(), template, objects=range(47), mypage=-2)
+        self.assertRangeEqual(range(30, 40), context['objects'])
+
+    def test_starting_from_negative_page_out_of_range(self):
+        # Ensure the last page is returned when the ``starting_from_page``
+        # argument, given a negative value, produces an out of range error.
+        template = '{% $tagname 10 objects starting from page -5 %}'
+        _, context = self.render(self.request(), template)
+        self.assertRangeEqual(range(10), context['objects'])
+
+    def test_num_queries(self):
+        # Ensure paginating objects hits the database for the correct number
+        # of times.
+        template = '{% $tagname 10 objects %}'
+        objects = self.assertPaginationNumQueries(2, template)
+        self.assertEqual(10, len(objects))
+
+    def test_num_queries_starting_from_another_page(self):
+        # Ensure paginating objects hits the database for the correct number
+        # of times if pagination is performed starting from another page.
+        template = '{% $tagname 10 objects starting from page 3 %}'
+        self.assertPaginationNumQueries(2, template)
+
+    def test_num_queries_starting_from_last_page(self):
+        # Ensure paginating objects hits the database for the correct number
+        # of times if pagination is performed starting from last page.
+        template = '{% $tagname 10 objects starting from page -1 %}'
+        self.assertPaginationNumQueries(2, template)
+
 
 class LazyPaginateTest(PaginateTestMixin, TestCase):
 
     tagname = 'lazy_paginate'
 
+    def test_starting_from_negative_page_raises_error(self):
+        # A *NotImplementedError* is raised if a negative value is given to
+        # the ``starting_from_page`` argument of ``lazy_paginate``.
+        template = '{% $tagname 10 objects starting from page -1 %}'
+        with self.assertRaises(NotImplementedError):
+            self.render(self.request(), template)
 
+    def test_num_queries(self):
+        # Ensure paginating objects hits the database for the correct number
+        # of times. If lazy pagination is used, the ``SELECT COUNT`` query
+        # should be avoided.
+        template = '{% $tagname 10 objects %}'
+        objects = self.assertPaginationNumQueries(1, template)
+        self.assertEqual(10, len(objects))
+
+    def test_num_queries_starting_from_another_page(self):
+        # Ensure paginating objects hits the database for the correct number
+        # of times if pagination is performed starting from another page.
+        template = '{% $tagname 10 objects starting from page 3 %}'
+        self.assertPaginationNumQueries(1, template)
+
+
+@skip_if_old_etree
 class ShowMoreTest(EtreeTemplateTagsTestMixin, TestCase):
 
     def test_first_page_next_url(self):
@@ -333,7 +428,26 @@ class GetPagesTest(TemplateTagsTestMixin, TestCase):
         with self.assertRaises(TemplateSyntaxError):
             self.render(request, template)
 
+    def test_starting_from_negative_page_in_another_page(self):
+        # Ensure the default page is missing the querystring when another
+        # page is displayed.
+        template = (
+            '{% paginate 10 objects starting from page -1 %}'
+            '{% get_pages %}'
+        )
+        _, context = self.render(
+            self.request(), template, objects=range(47), page=1)
+        page = context['pages'].last()
+        self.assertEqual('', page.url)
 
+    def test_pages_length(self):
+        # Ensure the pages length returns the correct number of pages.
+        template = '{% paginate 10 objects %}{% get_pages %}{{ pages|length }}'
+        html, context = self.render(self.request(), template)
+        self.assertEqual('5', html)
+
+
+@skip_if_old_etree
 class ShowPagesTest(EtreeTemplateTagsTestMixin, TestCase):
 
     def test_current_page(self):

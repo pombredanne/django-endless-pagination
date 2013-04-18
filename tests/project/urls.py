@@ -2,7 +2,7 @@
 
 from __future__ import unicode_literals
 
-from django.conf.urls.defaults import patterns, url
+from django.conf.urls import patterns, url
 from django.views.generic import TemplateView
 
 from endless_pagination.decorators import (
@@ -13,6 +13,7 @@ from endless_pagination.decorators import (
 from project.views import generic
 
 
+# Avoid lint errors for the following Django idiom: flake8: noqa.
 urlpatterns = patterns('',
     url(r'^$',
         TemplateView.as_view(template_name="home.html"),
